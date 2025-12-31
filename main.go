@@ -93,6 +93,15 @@ func main() {
 	srcRoot := filepath.Clean(args[0])
 	dstRoot := filepath.Clean(args[1])
 
+	if _, err := os.Stat(srcRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Source does not exist: %s\n", srcRoot)
+		os.Exit(1)
+	}
+	if _, err := os.Stat(dstRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "Target does not exist: %s\n", dstRoot)
+		os.Exit(1)
+	}
+
 	// First pass: calculate total size
 	fmt.Fprintf(os.Stderr, "Calculating total size...\n")
 	filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
