@@ -108,6 +108,7 @@ func main() {
 	// Tool flags
 	duplicatesFlag := flag.Bool("duplicates", false, "find duplicate files with (1) in name")
 	xmpFlag := flag.Bool("xmp", false, "rename XMP sidecar files to match their image files")
+	orphanedFlag := flag.Bool("orphaned", false, "remove orphaned XMP files (only with --xmp)")
 	
 	flag.Parse()
 	startTime = time.Now()
@@ -115,7 +116,7 @@ func main() {
 	// Determine which operation to run
 	if *duplicatesFlag || *xmpFlag {
 		// Tool operations (duplicates or xmp)
-		runToolOperation(*duplicatesFlag, *xmpFlag, targetFlag, applyFlag)
+		runToolOperation(*duplicatesFlag, *xmpFlag, targetFlag, applyFlag, *orphanedFlag)
 	} else if copyFlag || moveFlag {
 		// Copy/move operations
 		runCopyMoveOperation()
@@ -126,9 +127,14 @@ func main() {
 	}
 }
 
-func runToolOperation(duplicates, xmp bool, dir string, apply bool) {
+func runToolOperation(duplicates, xmp bool, dir string, apply bool, orphaned bool) {
 	if duplicates && xmp {
 		fmt.Fprintf(os.Stderr, "Error: cannot specify both --duplicates and --xmp\n")
+		os.Exit(1)
+	}
+
+	if orphaned && !xmp {
+		fmt.Fprintf(os.Stderr, "Error: --orphaned can only be used with --xmp\n")
 		os.Exit(1)
 	}
 
@@ -143,7 +149,7 @@ func runToolOperation(duplicates, xmp bool, dir string, apply bool) {
 	}
 
 	if xmp {
-		handleXMPRenaming(dir, apply)
+		handleXMPRenaming(dir, apply, orphaned)
 	} else {
 		handleDuplicates(dir, apply)
 	}
@@ -413,7 +419,7 @@ func handleDuplicates(dir string, apply bool) {
 	}
 }
 
-func handleXMPRenaming(dir string, apply bool) {
+func handleXMPRenaming(dir string, apply bool, orphaned bool) {
 	foundChanges := 0
 	skipped := 0
 	xmpFiles := make(map[string]string) // map of xmp path to correct path
@@ -525,12 +531,14 @@ func handleXMPRenaming(dir string, apply bool) {
 		
 		// If no image found, this XMP is orphaned
 		if foundImage == "" {
-			foundChanges++
-			relPath, _ := filepath.Rel(dir, path)
-			fmt.Printf("[REMOVE] %s (orphaned XMP, no base file exists)\n", relPath)
-			if apply {
-				if err := os.Remove(path); err != nil {
-					fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", path, err)
+			if orphaned {
+				foundChanges++
+				relPath, _ := filepath.Rel(dir, path)
+				fmt.Printf("[REMOVE] %s (orphaned XMP, no base file exists)\n", relPath)
+				if apply {
+					if err := os.Remove(path); err != nil {
+						fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", path, err)
+					}
 				}
 			}
 			return nil
@@ -543,12 +551,14 @@ func handleXMPRenaming(dir string, apply bool) {
 		// e.g., if XMP is "a (1).ARW.xmp", check if "a (1).ARW" exists
 		if _, err := os.Stat(exactImagePath); err != nil {
 			// The exact base file doesn't exist, this XMP is orphaned
-			foundChanges++
-			relPath, _ := filepath.Rel(dir, path)
-			fmt.Printf("[REMOVE] %s (orphaned XMP, no base file exists)\n", relPath)
-			if apply {
-				if err := os.Remove(path); err != nil {
-					fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", path, err)
+			if orphaned {
+				foundChanges++
+				relPath, _ := filepath.Rel(dir, path)
+				fmt.Printf("[REMOVE] %s (orphaned XMP, no base file exists)\n", relPath)
+				if apply {
+					if err := os.Remove(path); err != nil {
+						fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", path, err)
+					}
 				}
 			}
 			return nil
@@ -577,17 +587,19 @@ func handleXMPRenaming(dir string, apply bool) {
 				// Check if the base image actually exists
 				if _, err := os.Stat(foundImage); err != nil {
 					// Base image doesn't exist, the destination XMP is orphaned, remove it
-					if apply {
-						if err := os.Remove(correctXMPPath); err != nil {
-							fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", correctXMPPath, err)
+					if orphaned {
+						if apply {
+							if err := os.Remove(correctXMPPath); err != nil {
+								fmt.Fprintf(os.Stderr, "Error removing %s: %v\n", correctXMPPath, err)
+							} else {
+								relDestPath, _ := filepath.Rel(dir, correctXMPPath)
+								fmt.Printf("[REMOVE] %s (orphaned XMP, base doesn't exist)\n", relDestPath)
+							}
 						} else {
+							foundChanges++
 							relDestPath, _ := filepath.Rel(dir, correctXMPPath)
 							fmt.Printf("[REMOVE] %s (orphaned XMP, base doesn't exist)\n", relDestPath)
 						}
-					} else {
-						foundChanges++
-						relDestPath, _ := filepath.Rel(dir, correctXMPPath)
-						fmt.Printf("[REMOVE] %s (orphaned XMP, base doesn't exist)\n", relDestPath)
 					}
 				} else {
 					// Base image exists, just skip
